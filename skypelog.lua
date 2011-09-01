@@ -106,11 +106,3 @@ if #arg == 0 then
   os.exit (1)
 end
 io.processFiles (main)
-
-
--- Changelog
-
---   0.1  04aug04 Program started
---   0.11 06sep04 Refined interpretation of message files
---   0.12 08sep04 Now have direction of message
---   0.13 01sep11 Convert to Lua 5.1, update stdlib usage, update purpose, decode date
