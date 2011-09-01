@@ -1,9 +1,11 @@
-#! /usr/bin/lua
+#! /usr/bin/env lua
 prog = {
   name = "skypelog",
-  banner = "skypelog 0.12 (08 Sep 04) by Reuben Thomas (rrt@sc3d.org)",
-  purpose = "Turn a Skype log into text",
+  banner = "skypelog 0.13 (01 Sep 11) by Reuben Thomas (rrt@sc3d.org)",
+  purpose = "Parse a Skype chat log",
 }
+
+-- Based on original decoding work, with help from http://www.patrickmin.com/linux/tip.php?name=skype_timestamp
 
 
 require "std"
@@ -44,35 +46,38 @@ function main (file, number)
   local reclen = tonumber (num) + 8
   while true do
     local s = io.read (reclen)
-    if not s then break end
+    if not s then
+      break
+    end
     assert (string.sub (s, 1, 4) == "l33l")
     local len = lword (string.sub (s, 5, 8))
     local body = string.sub (s, 9, 9 + len - 1)
     assert (string.len (body) == len)
     local seq = lword (string.sub (body, 1, 4))
-    local bin0 = hex (string.sub (body, 5, 8)) -- always 41070009, 41080009 or 41090009 so far (07, 08, 09 is the month!)
-    assert (bin0 == "41070009" or bin0 == "41080009" or bin0 == "41090009")
-    local bin1 = hex (string.sub (body, 9, 12)) -- always 0303a401 so far
-    assert (bin1 == "0303a401")
     local _, to, name = string.find (body, "(%Z*)", 13)
     local type = hex (string.sub (body, to + 2, to + 8)) -- 00c9010103d001 = authorisation request/reply, 00c9010203d001 = message
+    assert (type == "00c9010103d001" or type == "00c9010203d001")
     local _, to, mess = string.find (body, "(%Z*)", to + 9)
-    local bin2 = hex (string.sub (body, to + 2, to + 4)) -- always 00a101 so far
-    assert (bin2 == "00a101")
-    local date = hex (string.sub (body, to + 5, to + 8)) -- not yet decoded (seems to be a number of seconds, but the epoch keeps
-                                                         -- incrementing in multiples of 128 seconds)
-    local rest = to + 9
-    local from, to, alias = string.find (body, "\003\168\001(%Z*)", to + 3)
-    local bin3, bin4
-    if from then
-      bin3 = hex (string.sub (body, rest, from - 1))
-      bin4 = hex (string.sub (body, to + 2, -1))
-    else
-      bin3 = hex (string.sub (body, rest, -1))
+    -- Indefinite length (little-endian, top bit is 1 until final byte)
+    local ctime = 0
+    local i = to + 5
+    while bit.band (string.byte (body [i]), 128) == 128 do
+      ctime = ctime + bit.band (string.byte (body [i]), 127) * (2 ^ ((i - (to + 5)) * 7))
+      i = i + 1
     end
-    local _, _, dir = string.find (bin3, "00cd010(.)")
+    local datestamp = string.chomp (io.shell ("ctime2date " .. tostring (ctime + 1073745342)))
+    local rest = i
+    local from, to, alias = string.find (body, "\003\168\001(%Z*)", to + 3)
+    local bin1, bin2
+    if from then
+      bin1 = hex (string.sub (body, rest, from - 1))
+      bin2 = hex (string.sub (body, to + 2, -1))
+    else
+      bin1 = hex (string.sub (body, rest, -1))
+    end
+    local _, _, dir = string.find (bin1, "00cd010(.)")
     if not dir then
-      _, _, dir = string.find (bin4, "00cd010(.)")
+      _, _, dir = string.find (bin2, "00cd010(.)")
     end
     assert (dir)
     if dir and bit.band (dir, 4) == 0 then
@@ -80,35 +85,25 @@ function main (file, number)
     else
       dir = "in"
     end
-    assert (type == "00c9010103d001" or -- control message
-            type == "00c9010203d001") -- ordinary message
     rec[seq] = {
       seq = seq,
       name = name,
       mess = mess,
       alias = alias,
-      date = date,
-      bin0 = bin0,
-      bin3 = bin3,
-      bin4 = bin4,
-      bin5 = bin5,
+      datestamp = datestamp,
       dir = dir,
     }
-    table.setn (rec, table.getn(rec) + 1)
     print (rec[seq])
   end
-  print (table.getn (rec) .. " records")
+  print (#rec .. " records")
 end
 
 
--- Command-line options
-options = {
-}
-
 -- Main routine
 getopt.processArgs ()
-if table.getn (arg) == 0 then
-  getopt.dieWithUsage ()
+if #arg == 0 then
+  getopt.usage ()
+  os.exit (1)
 end
 io.processFiles (main)
 
@@ -118,3 +113,4 @@ io.processFiles (main)
 --   0.1  04aug04 Program started
 --   0.11 06sep04 Refined interpretation of message files
 --   0.12 08sep04 Now have direction of message
+--   0.13 01sep11 Convert to Lua 5.1, update stdlib usage, update purpose, decode date
