@@ -1,0 +1,13 @@
+                               skypelog
+                               ========
+
+                 © Reuben Thomas <rrt@sc3d.org> 2011
+
+
+A simple Skype log parser, released under the GPLv3 or, at your
+option, any later version.
+
+The current version only works on very old Skype logs, and provides a
+simple front-end which merely dumps the Lua table built from the log.
+
+Support for newer logs and JSON output is planned.
