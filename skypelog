@@ -1,0 +1,21 @@
+#!/usr/bin/env lua
+prog = {
+  name = "skypelog",
+  banner = "skypelog 0.13 (01 Sep 11) © Reuben Thomas (rrt@sc3d.org)",
+  purpose = "Dump a Skype chat log",
+}
+
+require "std"
+require "skypelog"
+
+-- Main routine
+getopt.processArgs ()
+if #arg == 0 then
+  getopt.usage ()
+  os.exit (1)
+end
+io.processFiles (function (file)
+		   local rec = skypelog.parse_old (file)
+		   print (rec)
+		   print (#rec .. " records")
+		 end)

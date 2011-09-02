@@ -1,46 +1,21 @@
-#! /usr/bin/env lua
-prog = {
-  name = "skypelog",
-  banner = "skypelog 0.13 (01 Sep 11) by Reuben Thomas (rrt@sc3d.org)",
-  purpose = "Parse a Skype chat log",
-}
+--- Parse Skype logs
+-- © Reuben Thomas 2011
+-- Released under the GPLv3, or, at your option, any later version
+-- With help from http://www.patrickmin.com/linux/tip.php?name=skype_timestamp
+module ("skypelog", package.seeall)
 
--- Based on original decoding work, with help from http://www.patrickmin.com/linux/tip.php?name=skype_timestamp
+-- FIXME: Add decoder for newer logs, based on http://dmytry.com/texts/skype_chatlogs_friday_13.html
+-- Have separate parse methods which take reclen as parameter, and
+-- have a DWIM front-end which tries to guess the type of log and
+-- reclen from the filename.
 
 
 require "std"
-
-
--- Turn a little-endian word into a number
-function lword (s)
-  local res = 0
-  for i = string.len (s), 1, -1 do
-    res = res * 256 + string.byte (s, i)
-  end
-  return res
-end
-
--- Turn a big-endian word into a number
-function bword (s)
-  local res = 0
-  for i = 1, string.len (s) do
-    res = res * 256 + string.byte (s, i)
-  end
-  return res
-end
-
--- Turn a little-endian word into a hex string
-function hex (s)
-  local res = ""
-  for i = 1, string.len (s) do
-    res = res .. string.format ("%.2x", string.byte (s, i))
-  end
-  return res
-end
+require "bin"
 
 -- Process a file
-function main (file, number)
-  local rec = {n = 0}
+function parse_old (file)
+  local rec = {}
   io.input (file)
   local _, _, num = string.find (file, ".-(%d+)%.dbb$")
   local reclen = tonumber (num) + 8
@@ -50,12 +25,13 @@ function main (file, number)
       break
     end
     assert (string.sub (s, 1, 4) == "l33l")
-    local len = lword (string.sub (s, 5, 8))
+    local len = bin.le_to_number (string.sub (s, 5, 8))
     local body = string.sub (s, 9, 9 + len - 1)
     assert (string.len (body) == len)
-    local seq = lword (string.sub (body, 1, 4))
+    local seq = bin.le_to_number (string.sub (body, 1, 4))
     local _, to, name = string.find (body, "(%Z*)", 13)
-    local type = hex (string.sub (body, to + 2, to + 8)) -- 00c9010103d001 = authorisation request/reply, 00c9010203d001 = message
+    -- 00c9010103d001 = authorisation request/reply, 00c9010203d001 = message
+    local type = bin.le_to_hex (string.sub (body, to + 2, to + 8))
     assert (type == "00c9010103d001" or type == "00c9010203d001")
     local _, to, mess = string.find (body, "(%Z*)", to + 9)
     -- Indefinite length (little-endian, top bit is 1 until final byte)
@@ -65,22 +41,21 @@ function main (file, number)
       ctime = ctime + bit.band (string.byte (body [i]), 127) * (2 ^ ((i - (to + 5)) * 7))
       i = i + 1
     end
-    local datestamp = string.chomp (io.shell ("ctime2date " .. tostring (ctime + 1073745342)))
     local rest = i
     local from, to, alias = string.find (body, "\003\168\001(%Z*)", to + 3)
     local bin1, bin2
     if from then
-      bin1 = hex (string.sub (body, rest, from - 1))
-      bin2 = hex (string.sub (body, to + 2, -1))
+      bin1 = string.sub (body, rest, from - 1)
+      bin2 = string.sub (body, to + 2, -1)
     else
-      bin1 = hex (string.sub (body, rest, -1))
+      bin1 = string.sub (body, rest, -1)
     end
-    local _, _, dir = string.find (bin1, "00cd010(.)")
+    local _, _, dir = string.find (bin1, "%z\205\001(.)")
     if not dir then
-      _, _, dir = string.find (bin2, "00cd010(.)")
+      _, _, dir = string.find (bin2, "%z\205\001(.)")
     end
     assert (dir)
-    if dir and bit.band (dir, 4) == 0 then
+    if dir and bit.band (string.byte (dir), 4) == 0 then
       dir = "out"
     else
       dir = "in"
@@ -90,19 +65,9 @@ function main (file, number)
       name = name,
       mess = mess,
       alias = alias,
-      datestamp = datestamp,
+      ctime = ctime,
       dir = dir,
     }
-    print (rec[seq])
   end
-  print (#rec .. " records")
+  return rec
 end
-
-
--- Main routine
-getopt.processArgs ()
-if #arg == 0 then
-  getopt.usage ()
-  os.exit (1)
-end
-io.processFiles (main)
